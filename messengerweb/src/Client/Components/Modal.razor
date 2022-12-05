@@ -1,0 +1,75 @@
+﻿@using MessengerWeb.Shared
+@inject HttpClient Http
+@inject Services.EnginesHttpRepository Repository
+
+<div class="modal @ModalClass" tabindex="-1" role="dialog" style="display:@ModalDisplay">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header" style="background: #343434">
+                <h5 class="modal-title">Сохранить учетные данные</h5>
+            </div>
+            <div class="modal-body"  style="background: #3E3E3E">
+                    <fieldset disabled>
+                        <div class="col" style="margin: 10px">
+                            <label for="disabledTextInput">ID персоны</label>
+                            <input type="text" id="disabledTextInput" class="form-control" @bind="UUID">
+                        </div>
+                    </fieldset>
+                    <div class="col" style="margin: 10px">
+                      <label for="nameInput">ФИО</label>
+                      <input type="text" id="nameInput" class="form-control" placeholder="ФИО" @bind="Name">
+                    </div>
+                    <div class="col"  style="margin: 10px">
+                       <label for="positionInput">Должность</label>
+                      <input type="text" id="positionInput" class="form-control" placeholder="Должность" @bind="Position">
+                    </div>
+            </div>
+            <div class="modal-footer" style="background: #343434">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal" @onclick="() => Close()">Сохранить и закрыть</button>
+            </div>
+        </div>
+    </div>
+</div>
+
+
+@if (ShowBackdrop)
+{
+    <div class="modal-backdrop fade show"></div>
+}
+
+@code 
+{
+    public string Name { get; set; }
+    public string UUID { get; set; }
+    public string Position { get; set; }
+
+    public Guid Guid = Guid.NewGuid();
+    public string ModalDisplay = "none;";
+    public string ModalClass = "";
+    public bool ShowBackdrop = false;
+
+    public void Open(string uuid)
+    {
+        UUID = uuid;
+        ModalDisplay = "block;";
+        ModalClass = "Show";
+        ShowBackdrop = true;
+        StateHasChanged();
+    }
+
+    public async Task Close()
+    {
+        ModalDisplay = "none";
+        ModalClass = "";
+        ShowBackdrop = false;
+        var person = new Person()
+        {
+            Name = Name,
+            UUID = UUID,
+            Position = Position
+        };
+
+        await Repository.SavePerson(person, "Home/save_person");
+        StateHasChanged();
+    }
+}

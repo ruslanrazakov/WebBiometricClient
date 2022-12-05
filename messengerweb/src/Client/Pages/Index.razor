@@ -1,0 +1,202 @@
+﻿@page "/"
+@using System.Drawing;
+@using System.IO;
+@using System.Net.Http
+@using System.Timers
+@using MessengerWeb.Client.Constants
+@using MessengerWeb.Client.Services
+@using MessengerWeb.Shared
+@using Microsoft.Extensions.Logging
+@using System.Globalization
+@using System.Text.Json
+@using EngineEnum = MessengerWeb.Client.Services.Engine
+@implements IAsyncDisposable
+
+@inject IJSRuntime JSRuntime;
+@inject JSwrapper JSwrapper
+@inject HttpClient Http
+@inject EnginesHttpRepository Repository
+@inject Services.Settings SettingsService
+@inject Services.JsonHelper JsonHelper
+@inject ILogger<Index> Logger
+
+<h1>Детекция по движку @CurrentEngine.Name</h1>
+
+<div style="display: flex">
+    <label class="switch">
+        <input type="checkbox"
+            id="flexSwitchCheckDefault" 
+            @onchange="@(async (e) => await ToggleCamera())">>
+        <span class="slider round"></span>
+    </label>
+    <h3 style="margin-left:10px">Камера</h3>
+</div>
+
+<div style="display: flex">
+    <video class="round-border" id="video" width="480" height="360" controls></video>
+
+    <div class="container" style="display: @(CameraOn ? String.Empty : "none")">
+      <div class="column">
+         <div class="alert alert-warning alert-dismissible fade show" 
+              style="display: @(LivenessGood ? "none" : String.Empty)">
+            <strong></strong> Лица в кадре не обнаружены.
+         </div>
+
+        <div class="alert alert-warning alert-dismissible fade show"
+             style="display: @(MatchGood ? "none" : String.Empty)">
+            <strong></strong> Не удалось опознать лицо. Угроза безопасности!
+        </div>
+    </div>
+  </div>
+</div>
+
+<div style="margin-top:10px">
+    <button class="btn btn-secondary" 
+            type="button" 
+            @onclick="@(() =>GetLivenessFromExternalApi(null, null))">
+            Принудительный обмен данными
+    </button>
+</div>
+
+ <canvas id="capturedImage" width="480" height="360" style="display: none"></canvas>
+ <h1>Витальность: @LivenessScore</h1>
+ <h1>Данные о персоне:</h1>
+
+@if (!String.IsNullOrEmpty(Person.UUID))
+{
+    <div class="card text-white bg-dark mb-3" style="max-width: 18rem;">
+        <div class="card-header">@Person.Name</div>
+        <div class="card-body">
+            <h5 class="card-title">@Person.Position</h5>
+            <p class="card-text">Id: @Person.UUID</p>
+        </div>
+    </div>
+}
+else
+{
+    <h3>@MatchScore</h3>
+}
+
+@code {
+    private double liveness;
+    private string LivenessScore { get; set; }  = String.Empty;
+    private string MatchScore { get; set; } = String.Empty;
+
+    private bool LivenessGood => Double.TryParse(LivenessScore.Replace('.', ','), out liveness) && liveness > 0 ? true : false;
+    private bool MatchGood => MatchScore.Contains("not_identified") ? false : true;
+
+    private Timer _livenessTimer;
+    private Timer _matchingTimer;
+
+    private bool CameraOn { get; set; }
+
+    private EngineEntity CurrentEngine { get; set; }
+    private Person Person { get; set; } = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        CurrentEngine = SettingsService.Engines.FirstOrDefault(e => e.IsSelected);
+
+        _livenessTimer = new Timer(interval: 5000);
+        _matchingTimer = new Timer(interval: 5000);
+        _livenessTimer.Elapsed += GetLivenessFromExternalApi;
+        _matchingTimer.Elapsed += GetMatchFromExternalApi;
+
+        var lDotNetReference = DotNetObjectReference.Create(this);
+        await JSRuntime.InvokeVoidAsync("dotNetGlobal.SetDotnetReference", lDotNetReference);
+
+        ClearPage();
+    }
+
+    private async Task ToggleCamera()
+    {
+        if(CameraOn)
+        {
+            await StopCamera();
+            CameraOn = false;
+        }
+        else
+        {
+            await StartCamera();
+            CameraOn = true;
+        }
+    }
+
+    private async Task StartCamera()
+    {
+        await JSwrapper.StartVideo();
+
+        _livenessTimer.Enabled = true;
+        _matchingTimer.Enabled = true;
+    }
+
+    private async Task StopCamera()
+    {
+        await JSwrapper.StopVideo();
+
+        _livenessTimer.Enabled = false;
+        _matchingTimer.Enabled = false;
+        ClearPage();
+    }
+
+    private async void GetLivenessFromExternalApi(object source, ElapsedEventArgs e)
+    {
+        await JSwrapper.SnapFrame();
+        var imageBytes = await JSwrapper.GetImageData();
+
+        switch(CurrentEngine.Engine)
+        {
+            case EngineEnum.Luna:
+            case EngineEnum.Tevian:
+                LivenessScore = await Repository.Post(imageBytes, "Home/liveness", CurrentEngine.UUID);
+                Logger.LogInformation($"LivenessScore: {LivenessScore}, IsGood: {LivenessGood}");
+                break;
+            case EngineEnum.Ntech:
+                await JSwrapper.RecordVideoAndPost("Home/liveness", CurrentEngine.UUID);
+                break;
+        }
+        StateHasChanged();
+    }
+
+    [JSInvokable("GetLivenessFromNtech")]
+    public void GetLivenessFromNtech(string nTechLivenessResult)
+    {
+        if (CurrentEngine.Engine == Client.Services.Engine.Ntech)
+        {
+            LivenessScore = nTechLivenessResult;
+            Logger.LogInformation($"LivenessScore: {LivenessScore}, IsGood: {LivenessGood}");
+            InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async void GetMatchFromExternalApi(object source, ElapsedEventArgs e)
+    {
+        await JSwrapper.SnapFrame();
+        var imageBytes = await JSwrapper.GetImageData();
+        MatchScore = await Repository.Post(imageBytes, "Home/match", CurrentEngine.UUID);
+        Person = JsonHelper.ConvertToPerson(MatchScore);
+        Logger.LogInformation($"MatchScore: {MatchScore} IsMatched: {MatchGood}");
+        StateHasChanged();
+    }
+
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+        _livenessTimer.Enabled = false;
+        _matchingTimer.Enabled = false;
+
+        _livenessTimer.Elapsed -= GetLivenessFromExternalApi;
+        _matchingTimer.Elapsed -= GetMatchFromExternalApi;
+
+        if(CameraOn)
+            await StopCamera();
+        ClearPage();
+    }
+
+    public void ClearPage()
+    {
+        LivenessScore = String.Empty;
+        MatchScore = String.Empty;
+        Person = new Person();
+        InvokeAsync(StateHasChanged);
+    } 
+}

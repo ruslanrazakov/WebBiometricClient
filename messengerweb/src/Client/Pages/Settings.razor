@@ -1,0 +1,26 @@
+﻿@page "/settings"
+@using MessengerWeb.Client.Services
+@using MessengerWeb.Shared
+@inject HttpClient Http
+@inject Services.Settings SettingsService
+
+<h1>Настройки</h1>
+
+<h3>Используемый движок:</h3>
+
+@foreach(var engine in SettingsService.Engines)
+{
+    <div class="form-check">
+        <label style="margin:1%">
+            <input name="yourColor" type="radio"
+                   value="@engine.Name"
+                   checked="@engine.IsSelected"
+                   @onchange="@(() => 
+                    {
+                        SettingsService.Engines.ForEach(e=>e.IsSelected = false);
+                        engine.IsSelected = true; 
+                    })">
+            @engine.Name
+        </label>
+    </div>
+}

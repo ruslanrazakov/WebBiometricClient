@@ -1,0 +1,113 @@
+﻿@page "/register"
+
+@using System.Drawing;
+@using System.IO;
+@using System.Net.Http
+@using System.Timers
+@using MessengerWeb.Client.Services
+@implements IAsyncDisposable
+
+@inject IJSRuntime JSRuntime;
+@inject HttpClient Http
+@inject Services.EnginesHttpRepository Repository
+@inject Services.Settings SettingsService
+
+<div>
+    <h1>Регистрация в движке @CurrentEngine.Name</h1>
+</div>
+
+<div style="display: flex">
+    <label class="switch">
+        <input type="checkbox"
+            id="flexSwitchCheckDefault" 
+            @onchange="@(async (e) => await ToggleCamera())">>
+        <span class="slider round"></span>
+    </label>
+    <h3 style="margin-left:10px">Камера</h3>
+</div>
+
+
+<div style="margin-bottom:10px">
+    <button type="button" 
+            class="btn btn-secondary" 
+            @onclick="@(() => RegisterInExternalApi(null, null))">
+            Зарегистрировать
+    </button>
+</div>
+
+<div>
+    <video class="round-border" id="video" width="480" height="360" autoplay></video>
+    <canvas class="round-border" id="capturedImage" width="480" height="360"></canvas>
+</div>
+
+ <h3>@RegisterResponse</h3>
+
+ <MessengerWeb.Client.Components.Modal @ref="Modal"/>
+@code 
+{
+    private bool CameraOn { get; set; }
+
+    private string RegisterResponse { get; set; }
+    private EngineEntity CurrentEngine { get; set; }
+
+    private Components.Modal Modal { get; set; }
+
+    protected override void OnInitialized()
+    {
+        CurrentEngine = SettingsService.Engines.FirstOrDefault(e => e.IsSelected);
+    }
+
+    private async Task ToggleCamera()
+    {
+        if(!CameraOn)
+        {
+            await StartCamera();
+            CameraOn = true;
+        }
+        else
+        {
+            await StopCamera();
+            CameraOn = false;
+        }
+    }
+
+    private async Task StartCamera()
+    {
+        await JSRuntime.InvokeVoidAsync("startVideo");
+    }
+
+    private async Task StopCamera()
+    {
+        await JSRuntime.InvokeVoidAsync("stopVideo");
+    }
+
+    private async void RegisterInExternalApi(object source, ElapsedEventArgs e)
+    {
+        await JSRuntime.InvokeVoidAsync("Snap", "video", "capturedImage");
+        var imageBytes = await JSRuntime.InvokeAsync<string>("GetImageData", "capturedImage", "image/jpeg");
+
+        string result = await Repository.Post(imageBytes, "Home/register", CurrentEngine.UUID);
+
+        if (result.Contains("failed") || result.Contains("no_face"))
+        {
+            RegisterResponse = "Лица не обнаружены";
+        }
+        else if (result.Contains("exists"))
+        {
+            RegisterResponse = "Лицо уже зарегистрировано.";
+        }
+        else
+        {
+            RegisterResponse = $"Новое лицо зарегистрировано! ID: \"{result}\"";
+            Modal.Open(result);
+        }
+
+        StateHasChanged();
+    }
+
+    async ValueTask IAsyncDisposable.DisposeAsync()
+    {
+          if(CameraOn)
+            await StopCamera();
+    }
+}
