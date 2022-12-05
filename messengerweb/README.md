@@ -1,3 +1,6 @@
+Demo for internal Greenatom customers
+Todo: refactoring Server app. Add Polly lib for continuous requests. Incapsulate controller logic to service.
+
 # IBTP MessengerWeb Client
 ## 1. Структура решения:
 Blazor Webassembly ASP .Net Core 5 hosted приложение. Состоит из двух основных проектов:
